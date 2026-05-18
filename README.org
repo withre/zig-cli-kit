@@ -8,7 +8,7 @@
 #+html:<div align="center">
 #+html:<p>A small, boring CLI parsing toolkit for Zig applications.</p>
 #+html:<p>
-#+html:<img src="https://img.shields.io/badge/Zig-0.16%2B-orange?style=flat-square&logo=zig" alt="Zig 0.16+">
+#+html:<img src="https://img.shields.io/badge/Zig-0.17%20target-orange?style=flat-square&logo=zig" alt="Zig 0.17 target">
 #+html:<img src="https://img.shields.io/badge/Nix-flake-blue?style=flat-square&logo=nixos" alt="Nix flake">
 #+html:<img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License">
 #+html:</p>
@@ -18,7 +18,7 @@
 
 ** 🌄 Overview
 
-*zig-cli-kit* is a lightweight Zig library for defining command-line interfaces with declarative data structures. It targets the unreleased Zig =0.16= line (current =master=) and uses the new =std.Io= / =std.process.Init= APIs; nothing in this library predates that.
+*zig-cli-kit* is a lightweight Zig library for defining command-line interfaces with declarative data structures. It targets the Zig =0.17= development line while keeping Zig =0.16.0= green as the current deployment-compatible baseline. The API is built around =std.Io= / =std.process.Init=; nothing in this library predates Zig 0.16.
 
 The project intentionally stays small:
 
@@ -91,7 +91,7 @@ zig build run -- --project demo status
 zig build run -- --help
 #+end_src
 
-The Zig 0.16 "juicy =main=" entry point passes in a pre-initialised =std.process.Init= struct with allocator, IO, args, and the environment block. The library is shaped to consume it directly:
+The Zig 0.16+ "juicy =main=" entry point passes in a pre-initialised =std.process.Init= struct with allocator, IO, args, and the environment block. The library is shaped to consume it directly, and this remains the target shape for Zig 0.17:
 
 #+begin_src zig
 const std = @import("std");
@@ -136,16 +136,30 @@ pub fn main(init: std.process.Init) !void {
         init.io,
         &stdout.interface,
         &stderr.interface,
-        init.minimal.environ.block.ptr,
+        environBlockPtr(init.minimal.environ.block),
         args.items,
     ) catch |err| switch (err) {
         error.OutOfMemory => return err,
         else => std.process.exit(1),
     };
 }
+
+fn environBlockPtr(block: anytype) [*:null]const ?[*:0]const u8 {
+    const T = @TypeOf(block);
+    switch (@typeInfo(T)) {
+        .pointer => |ptr| {
+            if (ptr.size == .slice) return block.ptr;
+        },
+        .@"struct" => {
+            if (@hasField(T, "slice")) return block.slice.ptr;
+        },
+        else => {},
+    }
+    return block.ptr;
+}
 #+end_src
 
-The =init.minimal.environ.block= field is a sentinel slice on POSIX; =.ptr= adapts it to the many-item-pointer the library accepts. On platforms where the environment is not available as a raw block (WASI without libc, Windows), pass any null-terminated =[*:null]const ?[*:0]const u8= you own — environment binding simply finds nothing.
+The =init.minimal.environ.block= representation has drifted across 0.16/0.17 snapshots: some expose =block.slice.ptr= and others expose =block.ptr=. Use a tiny compatibility helper (as in the example source) to adapt it to the many-item pointer the library accepts. On platforms where the environment is not available as a raw block (WASI without libc, Windows), pass any null-terminated =[*:null]const ?[*:0]const u8= you own — environment binding simply finds nothing.
 
 #+html:</details>
 
@@ -188,7 +202,7 @@ The full set of parse-time errors is exposed as =cli.Error=:
 
 ** 📦 Installation
 
-Use Zig's package manager by adding this repository to your consuming project's =build.zig.zon=, then import the module from =build.zig=. Pin the project to a Zig =0.16= toolchain — the library uses APIs (=std.process.Init=, =std.Io.File=, =std.Io.Writer.Allocating=) that don't exist on =0.15= or older.
+Use Zig's package manager by adding this repository to your consuming project's =build.zig.zon=, then import the module from =build.zig=. Target Zig =0.17= development for new work; Zig =0.16.0= is still kept green as the minimum/deployment baseline. The library uses APIs (=std.process.Init=, =std.Io.File=, =std.Io.Writer.Allocating=) that don't exist on =0.15= or older.
 
 #+begin_src zig
 const dep = b.dependency("zig_cli_kit", .{
@@ -233,15 +247,16 @@ zig-cli-kit/
 │   ├── zig.nix
 │   ├── devshell.nix
 │   ├── checks/zig-cli-kit-test/default.nix
+│   ├── checks/zig-cli-kit-test-zig-master/default.nix
 │   └── packages/zig-cli-kit/default.nix
 └── src/
 #+end_example
 
-The flake uses =mitchellh/zig-overlay= for Zig and tracks its =master= channel, which mirrors upstream Zig dev builds. The exact overlay revision is pinned in =flake.lock=; bump it deliberately with =nix flake update zig-overlay=.
+The flake uses [[https://github.com/withre/zignix][=zignix=]] for Zig. The default =zig= in the devshell is the unreleased Zig =0.17= development line (zignix =zig-master= package) — that's the target version. =zig-0.16= is still available as a fallback wrapper for the deployment-compatible 0.16.0 baseline until 0.17.0 ships. zignix keeps both =zig-master= and =zig-0_16= current, and the exact revision is pinned in =flake.lock=; bump it deliberately with =nix flake update zignix=.
 
 ** 🚧 Status
 
-Early extraction. The API is unstable and subject to change while downstream tools adopt it. The library is built against the current Zig =0.16= dev line; expect to bump the pinned toolchain in lockstep with upstream until =0.16.0= is tagged.
+Early extraction. The API is unstable and subject to change while downstream tools adopt it. The library targets the current Zig =0.17= development line while preserving Zig =0.16.0= compatibility until the 0.17 release becomes the deployment baseline.
 
 ** 📄 License
 

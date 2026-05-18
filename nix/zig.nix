@@ -1,13 +1,19 @@
-{ inputs, system }:
+{ inputs, system, channel ? "0.16" }:
 
-# Zig toolchain used by this project.
+# Zig toolchain used by this project, pinned through zignix.
 #
-# We track `mitchellh/zig-overlay`'s `master` channel, which mirrors
-# upstream development builds. The exact revision is pinned through
-# `flake.lock` — bump it deliberately with:
-#
-#     nix flake update zig-overlay
-#
-# If a stable 0.16.x release becomes available in the overlay and is
-# preferred, switch to e.g. `packages.${system}."0.16.0"`.
-inputs.zig-overlay.packages.${system}.master
+# The project target is the Zig 0.17 development line (`channel = "master"`).
+# The devshell uses it as the primary `zig` on PATH (see ./devshell.nix);
+# `channel = "0.16"` selects the latest 0.16 release and remains the
+# deployment-compatible baseline for `nix build` consumers until 0.17.0 is
+# released. Both packages are maintained by zignix and pinned via flake.lock
+# so each channel is reproducible. Bump them with `nix flake update zignix`.
+
+let
+  packages = inputs.zignix.packages.${system};
+  byChannel = {
+    "0.16" = packages.zig-0_16;
+    "master" = packages.zig-master;
+  };
+in
+byChannel.${channel}
