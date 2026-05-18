@@ -1,0 +1,15 @@
+.{
+    .name = .zig_cli_kit,
+    .version = "0.1.0",
+    .fingerprint = 0x8b0d4bbddee0cea0,
+
+    .dependencies = .{},
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.org",
+        "LICENSE",
+    },
+}

@@ -1,0 +1,17 @@
+.{
+    .name = .zig_cli_kit_hello,
+    .version = "0.0.0",
+    .fingerprint = 0x2a550f5580458905,
+
+    .dependencies = .{
+        .zig_cli_kit = .{
+            .path = "../..",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

@@ -1,0 +1,18 @@
+# Zig
+.zig-cache/
+zig-cache/
+zig-out/
+
+# Nix
+result
+result-*
+
+# direnv
+.direnv/
+
+# Runtime state
+data/
+
+# Editor / OS
+.DS_Store
+*.swp

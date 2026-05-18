@@ -1,0 +1,248 @@
+:PROPERTIES:
+:ID:       9b0e71a1-9b0d-4ff0-8ef7-1c9a5a3f7a8f
+:END:
+#+title: zig-cli-kit - Small CLI Toolkit for Zig
+#+AUTHOR: rytswd
+#+OPTIONS: toc:3 num:nil ^:nil
+
+#+html:<div align="center">
+#+html:<p>A small, boring CLI parsing toolkit for Zig applications.</p>
+#+html:<p>
+#+html:<img src="https://img.shields.io/badge/Zig-0.16%2B-orange?style=flat-square&logo=zig" alt="Zig 0.16+">
+#+html:<img src="https://img.shields.io/badge/Nix-flake-blue?style=flat-square&logo=nixos" alt="Nix flake">
+#+html:<img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License">
+#+html:</p>
+#+html:</div>
+
+-----
+
+** 🌄 Overview
+
+*zig-cli-kit* is a lightweight Zig library for defining command-line interfaces with declarative data structures. It targets the unreleased Zig =0.16= line (current =master=) and uses the new =std.Io= / =std.process.Init= APIs; nothing in this library predates that.
+
+The project intentionally stays small:
+
+- no framework-style runtime;
+- no dependencies beyond Zig stdlib;
+- no generated command layer;
+- no attempt to become Zig's version of =clap=.
+
+** ✨ Features
+
+- Declarative =App= / =Command= / =FlagDef= / =ArgDef= definitions
+- Nested subcommands and aliases
+- Global flags that work before or after commands
+- Environment variable binding with =flag > env > default= priority
+- Required flag validation
+- Mutual exclusion checks
+- =--= rest-argument capture
+- Did-you-mean suggestions for commands and flags (recurses into subcommands)
+- Negatable boolean flags (=--no-X=)
+- TTY-aware coloured help output
+- No =std.process.exit= and no =std.debug.print= in library code — all output goes through writers supplied by the caller, parse failures are returned as narrow =Error= values
+
+** 🚀 Quick Start
+
+Define the command tree as declarative data and hand it to =App.run=. Handlers receive the same =Allocator= and a =*cli.Context= they can read flags, positionals, env, and writers from:
+
+#+begin_src zig
+const std = @import("std");
+const cli = @import("zig-cli-kit");
+
+fn handleStatus(allocator: std.mem.Allocator, ctx: *cli.Context) !void {
+    _ = allocator;
+    try ctx.stdout.print("status: project={s}\n", .{ctx.flag("project")});
+}
+
+const app: cli.App = .{
+    .name = "example",
+    .description = "example CLI",
+    .global_flags = &.{
+        .{ .name = "project", .short = 'p', .default = "default", .env = "PROJECT", .description = "Project name" },
+    },
+    .commands = &.{
+        .{ .name = "status", .description = "Show status", .run = handleStatus },
+    },
+};
+#+end_src
+
+The caller's =main= owns argv, env, writers, and the exit code. =App.run= never exits the process and never writes to global stdio; it accepts the writers it should use. Method receivers stay first; stdlib interface values (allocator, IO, writers, env block) follow, then ordinary data:
+
+#+begin_src zig
+try app.run(
+    allocator,         // std.mem.Allocator
+    io,                // std.Io
+    stdout_writer,     // *std.Io.Writer
+    stderr_writer,     // *std.Io.Writer
+    env_block,         // [*:null]const ?[*:0]const u8
+    args,              // []const []const u8
+);
+#+end_src
+
+#+html:<details>
+#+html:<summary>Full <code>main.zig</code> using <code>pub fn main(init: std.process.Init)</code></summary>
+
+This is also kept as a buildable example at [[file:examples/hello/src/main.zig][=examples/hello/src/main.zig=]]. Build and run it from the example directory:
+
+#+begin_src bash
+cd examples/hello
+zig build run -- status
+zig build run -- --project demo status
+zig build run -- --help
+#+end_src
+
+The Zig 0.16 "juicy =main=" entry point passes in a pre-initialised =std.process.Init= struct with allocator, IO, args, and the environment block. The library is shaped to consume it directly:
+
+#+begin_src zig
+const std = @import("std");
+const cli = @import("zig-cli-kit");
+
+fn handleStatus(allocator: std.mem.Allocator, ctx: *cli.Context) !void {
+    _ = allocator;
+    try ctx.stdout.print("status: project={s}\n", .{ctx.flag("project")});
+}
+
+const app: cli.App = .{
+    .name = "hello",
+    .description = "hello example for zig-cli-kit",
+    .global_flags = &.{
+        .{ .name = "project", .short = 'p', .default = "default", .env = "PROJECT", .description = "Project name" },
+    },
+    .commands = &.{
+        .{ .name = "status", .description = "Show status", .run = handleStatus },
+    },
+};
+
+pub fn main(init: std.process.Init) !void {
+    // Buffered writers for stdout / stderr. The library never touches
+    // global stdio, so the caller owns the buffers and the flush.
+    var stdout_buf: [4096]u8 = undefined;
+    var stderr_buf: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(init.io, &stdout_buf);
+    var stderr = std.Io.File.stderr().writer(init.io, &stderr_buf);
+    defer stdout.interface.flush() catch {};
+    defer stderr.interface.flush() catch {};
+
+    // Materialise the argv iterator into the `[]const []const u8` the
+    // library expects. Zig's iterator already handles WASI/Windows quirks.
+    var args_iter = try std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa);
+    defer args_iter.deinit();
+    var args: std.ArrayList([]const u8) = .empty;
+    defer args.deinit(init.gpa);
+    while (args_iter.next()) |arg| try args.append(init.gpa, arg);
+
+    app.run(
+        init.gpa,
+        init.io,
+        &stdout.interface,
+        &stderr.interface,
+        init.minimal.environ.block.ptr,
+        args.items,
+    ) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+        else => std.process.exit(1),
+    };
+}
+#+end_src
+
+The =init.minimal.environ.block= field is a sentinel slice on POSIX; =.ptr= adapts it to the many-item-pointer the library accepts. On platforms where the environment is not available as a raw block (WASI without libc, Windows), pass any null-terminated =[*:null]const ?[*:0]const u8= you own — environment binding simply finds nothing.
+
+#+html:</details>
+
+** ⚠️ Error Handling
+
+=App.run= returns =anyerror!void= intentionally: user command-handler errors are forwarded verbatim. Before a handler runs, parse-time failures are members of =cli.Error= and are written as human-readable messages to the supplied =stderr= writer.
+
+A simple application can map every non-OOM error to a generic non-zero exit code:
+
+#+begin_src zig
+app.run(...) catch |err| switch (err) {
+    error.OutOfMemory => return err,
+    else => std.process.exit(1),
+};
+#+end_src
+
+A caller that wants specific parse exits can still match those names:
+
+#+begin_src zig
+app.run(...) catch |err| switch (err) {
+    error.OutOfMemory => return err,
+    error.UnknownCommand, error.UnknownFlag => std.process.exit(64),
+    error.MissingRequiredFlag => std.process.exit(78),
+    else => std.process.exit(1), // handler errors and other parse errors
+};
+#+end_src
+
+The full set of parse-time errors is exposed as =cli.Error=:
+
+| Error                  | Meaning                                |
+|------------------------+----------------------------------------|
+| =UnknownCommand=       | First non-flag token didn't match any command |
+| =UnknownSubcommand=    | Parent matched but child didn't        |
+| =UnknownFlag=          | =--foo= or =-x= not declared           |
+| =MissingFlagValue=     | Value-taking flag had no value         |
+| =MissingRequiredFlag=  | A =.required = true= flag was absent   |
+| =ConflictingFlags=     | Two mutually-exclusive flags set       |
+| =UnexpectedArgument=   | Too many positional arguments          |
+| =InvalidIntValue=      | =ctx.flagInt= got an unparseable value  |
+
+** 📦 Installation
+
+Use Zig's package manager by adding this repository to your consuming project's =build.zig.zon=, then import the module from =build.zig=. Pin the project to a Zig =0.16= toolchain — the library uses APIs (=std.process.Init=, =std.Io.File=, =std.Io.Writer.Allocating=) that don't exist on =0.15= or older.
+
+#+begin_src zig
+const dep = b.dependency("zig_cli_kit", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("zig-cli-kit", dep.module("zig-cli-kit"));
+#+end_src
+
+Exact =build.zig.zon= wiring will depend on whether this repository is consumed by URL, local path, or flake-managed source.
+
+** 🔧 Development
+
+With direnv (which pins Zig via the flake's =nix/zig.nix=):
+
+#+begin_src bash
+direnv allow
+zig build test
+#+end_src
+
+Without direnv:
+
+#+begin_src bash
+nix develop
+zig build test
+#+end_src
+
+Run Nix checks:
+
+#+begin_src bash
+nix flake check
+#+end_src
+
+** ❄️ Nix
+
+Nix code is intentionally separate from Zig code and kept small.
+
+#+begin_example
+zig-cli-kit/
+├── flake.nix
+├── nix/
+│   ├── zig.nix
+│   ├── devshell.nix
+│   ├── checks/zig-cli-kit-test/default.nix
+│   └── packages/zig-cli-kit/default.nix
+└── src/
+#+end_example
+
+The flake uses =mitchellh/zig-overlay= for Zig and tracks its =master= channel, which mirrors upstream Zig dev builds. The exact overlay revision is pinned in =flake.lock=; bump it deliberately with =nix flake update zig-overlay=.
+
+** 🚧 Status
+
+Early extraction. The API is unstable and subject to change while downstream tools adopt it. The library is built against the current Zig =0.16= dev line; expect to bump the pinned toolchain in lockstep with upstream until =0.16.0= is tagged.
+
+** 📄 License
+
+MIT
