@@ -1,9 +1,8 @@
 :PROPERTIES:
 :ID:       9b0e71a1-9b0d-4ff0-8ef7-1c9a5a3f7a8f
 :END:
-#+title: zig-cli-kit - Small CLI Toolkit for Zig
-#+AUTHOR: rytswd
-#+OPTIONS: toc:3 num:nil ^:nil
+#+title: zig-cli-kit
+#+OPTIONS: toc:2 num:nil ^:nil
 
 #+html:<div align="center">
 #+html:<p>A small, boring CLI parsing toolkit for Zig applications.</p>
@@ -18,246 +17,267 @@
 
 ** 🌄 Overview
 
-*zig-cli-kit* is a lightweight Zig library for defining command-line interfaces with declarative data structures. It targets the Zig =0.17= development line while keeping Zig =0.16.0= green as the current deployment-compatible baseline. The API is built around =std.Io= / =std.process.Init=; nothing in this library predates Zig 0.16.
+*zig-cli-kit* defines command-line interfaces as declarative data and hands
+them to =App.run=. It targets the Zig =0.17= development line and keeps Zig
+=0.16.0= green as the deployment baseline. The API is built around =std.Io=
+/ =std.process.Init=; nothing here predates Zig 0.16.
 
-The project intentionally stays small:
+The library never calls =std.process.exit= or =std.debug.print= — all
+output goes through writers the caller supplies, and parse failures come
+back as narrow =Error= values. The caller owns argv, env, writers, and the
+exit code.
 
-- no framework-style runtime;
-- no dependencies beyond Zig stdlib;
-- no generated command layer;
-- no attempt to become Zig's version of =clap=.
+It stays deliberately small: no framework runtime, no dependencies beyond
+the Zig stdlib, no generated command layer, no ambition to become Zig's
+=clap=.
+
+#+html:<div align="center">
+#+html:<img src="docs/help-output.png" alt="zig-cli-kit help output" width="720">
+#+html:</div>
 
 ** ✨ Features
 
 - Declarative =App= / =Command= / =FlagDef= / =ArgDef= definitions
 - Nested subcommands and aliases
 - Global flags that work before or after commands
-- Environment variable binding with =flag > env > default= priority
-- Required flag validation
-- Mutual exclusion checks
+- Environment binding with =flag > env > default= priority
+- Required-flag validation and mutual-exclusion checks
 - =--= rest-argument capture
 - Did-you-mean suggestions for commands and flags (recurses into subcommands)
 - Negatable boolean flags (=--no-X=)
 - TTY-aware coloured help output
-- No =std.process.exit= and no =std.debug.print= in library code — all output goes through writers supplied by the caller, parse failures are returned as narrow =Error= values
 
 ** 🚀 Quick Start
 
-Define the command tree as declarative data and hand it to =App.run=. Handlers receive the same =Allocator= and a =*cli.Context= they can read flags, positionals, env, and writers from:
+Define the command tree as data; handlers receive an =Allocator= and a
+=*cli.Context= they read flags, positionals, env, and writers from.
 
 #+begin_src zig
-const std = @import("std");
-const cli = @import("zig-cli-kit");
+  const std = @import("std");
+  const cli = @import("zig-cli-kit");
 
-fn handleStatus(allocator: std.mem.Allocator, ctx: *cli.Context) !void {
-    _ = allocator;
-    try ctx.stdout.print("status: project={s}\n", .{ctx.flag("project")});
-}
+  fn handleStatus(allocator: std.mem.Allocator, ctx: *cli.Context) !void {
+      _ = allocator;
+      try ctx.stdout.print("status: project={s}\n", .{ctx.flag("project")});
+  }
 
-const app: cli.App = .{
-    .name = "example",
-    .description = "example CLI",
-    .global_flags = &.{
-        .{ .name = "project", .short = 'p', .default = "default", .env = "PROJECT", .description = "Project name" },
-    },
-    .commands = &.{
-        .{ .name = "status", .description = "Show status", .run = handleStatus },
-    },
-};
+  const app: cli.App = .{
+      .name = "example",
+      .description = "example CLI",
+      .global_flags = &.{
+          .{ .name = "project", .short = 'p', .default = "default", .env = "PROJECT", .description = "Project name" },
+      },
+      .commands = &.{
+          .{ .name = "status", .description = "Show status", .run = handleStatus },
+      },
+  };
 #+end_src
 
-The caller's =main= owns argv, env, writers, and the exit code. =App.run= never exits the process and never writes to global stdio; it accepts the writers it should use. Method receivers stay first; stdlib interface values (allocator, IO, writers, env block) follow, then ordinary data:
+=App.run= never exits the process and never touches global stdio; it uses
+the writers you pass. Method receiver first, then stdlib interface values
+(allocator, IO, writers, env block), then data:
 
 #+begin_src zig
-try app.run(
-    allocator,         // std.mem.Allocator
-    io,                // std.Io
-    stdout_writer,     // *std.Io.Writer
-    stderr_writer,     // *std.Io.Writer
-    env_block,         // [*:null]const ?[*:0]const u8
-    args,              // []const []const u8
-);
+  try app.run(
+      allocator,         // std.mem.Allocator
+      io,                // std.Io
+      stdout_writer,     // *std.Io.Writer
+      stderr_writer,     // *std.Io.Writer
+      env_block,         // [*:null]const ?[*:0]const u8
+      args,              // []const []const u8
+  );
 #+end_src
 
 #+html:<details>
-#+html:<summary>Full <code>main.zig</code> using <code>pub fn main(init: std.process.Init)</code></summary>
+#+html:<summary><b>Full <code>main.zig</code> with <code>pub fn main(init: std.process.Init)</code></b></summary>
+#+html:<br>
 
-This is also kept as a buildable example at [[file:examples/hello/src/main.zig][=examples/hello/src/main.zig=]]. Build and run it from the example directory:
+Kept as a buildable example at [[file:examples/hello/src/main.zig][=examples/hello/src/main.zig=]]:
 
-#+begin_src bash
-cd examples/hello
-zig build run -- status
-zig build run -- --project demo status
-zig build run -- --help
+#+begin_src sh
+  cd examples/hello
+  zig build run -- status
+  zig build run -- --project demo status
+  zig build run -- --help
 #+end_src
 
-The Zig 0.16+ "juicy =main=" entry point passes in a pre-initialised =std.process.Init= struct with allocator, IO, args, and the environment block. The library is shaped to consume it directly, and this remains the target shape for Zig 0.17:
+The Zig 0.16+ "juicy =main=" entry point passes a pre-initialised
+=std.process.Init= with allocator, IO, args, and the environment block.
+The library consumes it directly, and this stays the target shape for 0.17.
 
 #+begin_src zig
-const std = @import("std");
-const cli = @import("zig-cli-kit");
+  const std = @import("std");
+  const cli = @import("zig-cli-kit");
 
-fn handleStatus(allocator: std.mem.Allocator, ctx: *cli.Context) !void {
-    _ = allocator;
-    try ctx.stdout.print("status: project={s}\n", .{ctx.flag("project")});
-}
+  fn handleStatus(allocator: std.mem.Allocator, ctx: *cli.Context) !void {
+      _ = allocator;
+      try ctx.stdout.print("status: project={s}\n", .{ctx.flag("project")});
+  }
 
-const app: cli.App = .{
-    .name = "hello",
-    .description = "hello example for zig-cli-kit",
-    .global_flags = &.{
-        .{ .name = "project", .short = 'p', .default = "default", .env = "PROJECT", .description = "Project name" },
-    },
-    .commands = &.{
-        .{ .name = "status", .description = "Show status", .run = handleStatus },
-    },
-};
+  const app: cli.App = .{
+      .name = "hello",
+      .description = "hello example for zig-cli-kit",
+      .global_flags = &.{
+          .{ .name = "project", .short = 'p', .default = "default", .env = "PROJECT", .description = "Project name" },
+      },
+      .commands = &.{
+          .{ .name = "status", .description = "Show status", .run = handleStatus },
+      },
+  };
 
-pub fn main(init: std.process.Init) !void {
-    // Buffered writers for stdout / stderr. The library never touches
-    // global stdio, so the caller owns the buffers and the flush.
-    var stdout_buf: [4096]u8 = undefined;
-    var stderr_buf: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(init.io, &stdout_buf);
-    var stderr = std.Io.File.stderr().writer(init.io, &stderr_buf);
-    defer stdout.interface.flush() catch {};
-    defer stderr.interface.flush() catch {};
+  pub fn main(init: std.process.Init) !void {
+      // Buffered writers for stdout / stderr. The library never touches
+      // global stdio, so the caller owns the buffers and the flush.
+      var stdout_buf: [4096]u8 = undefined;
+      var stderr_buf: [4096]u8 = undefined;
+      var stdout = std.Io.File.stdout().writer(init.io, &stdout_buf);
+      var stderr = std.Io.File.stderr().writer(init.io, &stderr_buf);
+      defer stdout.interface.flush() catch {};
+      defer stderr.interface.flush() catch {};
 
-    // Materialise the argv iterator into the `[]const []const u8` the
-    // library expects. Zig's iterator already handles WASI/Windows quirks.
-    var args_iter = try std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa);
-    defer args_iter.deinit();
-    var args: std.ArrayList([]const u8) = .empty;
-    defer args.deinit(init.gpa);
-    while (args_iter.next()) |arg| try args.append(init.gpa, arg);
+      // Materialise the argv iterator into the `[]const []const u8` the
+      // library expects. Zig's iterator handles WASI/Windows quirks.
+      var args_iter = try std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa);
+      defer args_iter.deinit();
+      var args: std.ArrayList([]const u8) = .empty;
+      defer args.deinit(init.gpa);
+      while (args_iter.next()) |arg| try args.append(init.gpa, arg);
 
-    app.run(
-        init.gpa,
-        init.io,
-        &stdout.interface,
-        &stderr.interface,
-        environBlockPtr(init.minimal.environ.block),
-        args.items,
-    ) catch |err| switch (err) {
-        error.OutOfMemory => return err,
-        else => std.process.exit(1),
-    };
-}
+      app.run(
+          init.gpa,
+          init.io,
+          &stdout.interface,
+          &stderr.interface,
+          environBlockPtr(init.minimal.environ.block),
+          args.items,
+      ) catch |err| switch (err) {
+          error.OutOfMemory => return err,
+          else => std.process.exit(1),
+      };
+  }
 
-fn environBlockPtr(block: anytype) [*:null]const ?[*:0]const u8 {
-    const T = @TypeOf(block);
-    switch (@typeInfo(T)) {
-        .pointer => |ptr| {
-            if (ptr.size == .slice) return block.ptr;
-        },
-        .@"struct" => {
-            if (@hasField(T, "slice")) return block.slice.ptr;
-        },
-        else => {},
-    }
-    return block.ptr;
-}
+  fn environBlockPtr(block: anytype) [*:null]const ?[*:0]const u8 {
+      const T = @TypeOf(block);
+      switch (@typeInfo(T)) {
+          .pointer => |ptr| {
+              if (ptr.size == .slice) return block.ptr;
+          },
+          .@"struct" => {
+              if (@hasField(T, "slice")) return block.slice.ptr;
+          },
+          else => {},
+      }
+      return block.ptr;
+  }
 #+end_src
 
-The =init.minimal.environ.block= representation has drifted across 0.16/0.17 snapshots: some expose =block.slice.ptr= and others expose =block.ptr=. Use a tiny compatibility helper (as in the example source) to adapt it to the many-item pointer the library accepts. On platforms where the environment is not available as a raw block (WASI without libc, Windows), pass any null-terminated =[*:null]const ?[*:0]const u8= you own — environment binding simply finds nothing.
+The =init.minimal.environ.block= representation has drifted across
+0.16/0.17 snapshots: some expose =block.slice.ptr=, others =block.ptr=. The
+tiny helper above adapts either to the many-item pointer the library wants.
+On platforms without a raw environment block (WASI without libc, Windows),
+pass any null-terminated =[*:null]const ?[*:0]const u8= you own — env
+binding simply finds nothing.
 
 #+html:</details>
 
 ** ⚠️ Error Handling
 
-=App.run= returns =anyerror!void= intentionally: user command-handler errors are forwarded verbatim. Before a handler runs, parse-time failures are members of =cli.Error= and are written as human-readable messages to the supplied =stderr= writer.
-
-A simple application can map every non-OOM error to a generic non-zero exit code:
-
-#+begin_src zig
-app.run(...) catch |err| switch (err) {
-    error.OutOfMemory => return err,
-    else => std.process.exit(1),
-};
-#+end_src
-
-A caller that wants specific parse exits can still match those names:
+=App.run= returns =anyerror!void=: handler errors are forwarded verbatim.
+Parse-time failures are members of =cli.Error= and are written as
+human-readable messages to the supplied =stderr= before any handler runs.
 
 #+begin_src zig
-app.run(...) catch |err| switch (err) {
-    error.OutOfMemory => return err,
-    error.UnknownCommand, error.UnknownFlag => std.process.exit(64),
-    error.MissingRequiredFlag => std.process.exit(78),
-    else => std.process.exit(1), // handler errors and other parse errors
-};
+  app.run(...) catch |err| switch (err) {
+      error.OutOfMemory => return err,
+      else => std.process.exit(1),
+  };
 #+end_src
 
-The full set of parse-time errors is exposed as =cli.Error=:
+#+html:<details>
+#+html:<summary><b>The full <code>cli.Error</code> set</b></summary>
+#+html:<br>
 
-| Error                  | Meaning                                |
-|------------------------+----------------------------------------|
-| =UnknownCommand=       | First non-flag token didn't match any command |
-| =UnknownSubcommand=    | Parent matched but child didn't        |
-| =UnknownFlag=          | =--foo= or =-x= not declared           |
-| =MissingFlagValue=     | Value-taking flag had no value         |
-| =MissingRequiredFlag=  | A =.required = true= flag was absent   |
-| =ConflictingFlags=     | Two mutually-exclusive flags set       |
-| =UnexpectedArgument=   | Too many positional arguments          |
-| =InvalidIntValue=      | =ctx.flagInt= got an unparseable value  |
+A caller that wants specific parse exits can match the names:
+
+#+begin_src zig
+  app.run(...) catch |err| switch (err) {
+      error.OutOfMemory => return err,
+      error.UnknownCommand, error.UnknownFlag => std.process.exit(64),
+      error.MissingRequiredFlag => std.process.exit(78),
+      else => std.process.exit(1), // handler errors and other parse errors
+  };
+#+end_src
+
+| Error                 | Meaning                                        |
+|-----------------------+------------------------------------------------|
+| ~UnknownCommand~      | First non-flag token didn't match any command  |
+| ~UnknownSubcommand~   | Parent matched but child didn't                |
+| ~UnknownFlag~         | ~--foo~ or ~-x~ not declared                   |
+| ~MissingFlagValue~    | Value-taking flag had no value                 |
+| ~MissingRequiredFlag~ | A ~.required = true~ flag was absent           |
+| ~ConflictingFlags~    | Two mutually-exclusive flags set               |
+| ~UnexpectedArgument~  | Too many positional arguments                  |
+| ~InvalidIntValue~     | ~ctx.flagInt~ got an unparseable value         |
+
+#+html:</details>
 
 ** 📦 Installation
 
-Use Zig's package manager by adding this repository to your consuming project's =build.zig.zon=, then import the module from =build.zig=. Target Zig =0.17= development for new work; Zig =0.16.0= is still kept green as the minimum/deployment baseline. The library uses APIs (=std.process.Init=, =std.Io.File=, =std.Io.Writer.Allocating=) that don't exist on =0.15= or older.
+Add this repository to your =build.zig.zon=, then import the module from
+=build.zig=. Target Zig =0.17= development for new work; =0.16.0= is the
+minimum baseline. The library uses APIs (=std.process.Init=, =std.Io.File=,
+=std.Io.Writer.Allocating=) that don't exist on =0.15= or older.
 
 #+begin_src zig
-const dep = b.dependency("zig_cli_kit", .{
-    .target = target,
-    .optimize = optimize,
-});
-exe.root_module.addImport("zig-cli-kit", dep.module("zig-cli-kit"));
+  const dep = b.dependency("zig_cli_kit", .{
+      .target = target,
+      .optimize = optimize,
+  });
+  exe.root_module.addImport("zig-cli-kit", dep.module("zig-cli-kit"));
 #+end_src
-
-Exact =build.zig.zon= wiring will depend on whether this repository is consumed by URL, local path, or flake-managed source.
 
 ** 🔧 Development
 
-With direnv (which pins Zig via the flake's =nix/zig.nix=):
-
-#+begin_src bash
-direnv allow
-zig build test
+#+begin_src sh
+  direnv allow      # or: nix develop
+  zig build test
+  nix flake check
 #+end_src
 
-Without direnv:
+With direnv (or =nix develop=) the flake pins Zig via =nix/zig.nix=.
 
-#+begin_src bash
-nix develop
-zig build test
-#+end_src
+#+html:<details>
+#+html:<summary><b>❄️ Nix layout</b></summary>
+#+html:<br>
 
-Run Nix checks:
-
-#+begin_src bash
-nix flake check
-#+end_src
-
-** ❄️ Nix
-
-Nix code is intentionally separate from Zig code and kept small.
+Nix code is kept separate from Zig code and small.
 
 #+begin_example
-zig-cli-kit/
-├── flake.nix
-├── nix/
-│   ├── zig.nix
-│   ├── devshell.nix
-│   ├── checks/zig-cli-kit-test/default.nix
-│   ├── checks/zig-cli-kit-test-zig-master/default.nix
-│   └── packages/zig-cli-kit/default.nix
-└── src/
+  zig-cli-kit/
+  ├── flake.nix
+  ├── nix/
+  │   ├── zig.nix
+  │   ├── devshell.nix
+  │   ├── checks/zig-cli-kit-test/default.nix
+  │   ├── checks/zig-cli-kit-test-zig-master/default.nix
+  │   └── packages/zig-cli-kit/default.nix
+  └── src/
 #+end_example
 
-The flake uses [[https://github.com/withre/zignix][=zignix=]] for Zig. The default =zig= in the devshell is the unreleased Zig =0.17= development line (zignix =zig-master= package) — that's the target version. =zig-0.16= is still available as a fallback wrapper for the deployment-compatible 0.16.0 baseline until 0.17.0 ships. zignix keeps both =zig-master= and =zig-0_16= current, and the exact revision is pinned in =flake.lock=; bump it deliberately with =nix flake update zignix=.
+Zig comes from [[https://github.com/withre/zignix][=zignix=]]. The default =zig= in the devshell is the
+unreleased Zig =0.17= development line (zignix =zig-master=) — the target
+version — exposed alongside =zig-0.16= (the 0.16.0 baseline) via zignix's
+=withName=. zignix keeps both packages current; the revision is pinned in
+=flake.lock=. Bump it with =nix flake update zignix=.
+
+#+html:</details>
 
 ** 🚧 Status
 
-Early extraction. The API is unstable and subject to change while downstream tools adopt it. The library targets the current Zig =0.17= development line while preserving Zig =0.16.0= compatibility until the 0.17 release becomes the deployment baseline.
+Early extraction. The API is unstable and will change while downstream
+tools adopt it. Targets the current Zig =0.17= development line while
+preserving =0.16.0= compatibility until 0.17 becomes the baseline.
 
 ** 📄 License
 
-MIT
+[[file:LICENSE][MIT]].
