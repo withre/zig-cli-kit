@@ -180,7 +180,30 @@ binding simply finds nothing.
 
 #+html:</details>
 
-** ⚠️ Error Handling
+** 📋 Details
+
+*** Installation
+
+Add this repository to your =build.zig.zon=, then import the module from
+=build.zig=. Target Zig =0.17= development for new work; =0.16.0= is the
+minimum baseline. The library uses APIs (=std.process.Init=, =std.Io.File=,
+=std.Io.Writer.Allocating=) that don't exist on =0.15= or older.
+
+#+begin_src zig
+  const dep = b.dependency("zig_cli_kit", .{
+      .target = target,
+      .optimize = optimize,
+  });
+  exe.root_module.addImport("zig-cli-kit", dep.module("zig-cli-kit"));
+#+end_src
+
+*** Status
+
+Early extraction. The API is unstable and will change while downstream
+tools adopt it. Targets the current Zig =0.17= development line while
+preserving =0.16.0= compatibility until 0.17 becomes the baseline.
+
+*** Error Handling
 
 =App.run= returns =anyerror!void=: handler errors are forwarded verbatim.
 Parse-time failures are members of =cli.Error= and are written as
@@ -221,22 +244,7 @@ A caller that wants specific parse exits can match the names:
 
 #+html:</details>
 
-** 📦 Installation
-
-Add this repository to your =build.zig.zon=, then import the module from
-=build.zig=. Target Zig =0.17= development for new work; =0.16.0= is the
-minimum baseline. The library uses APIs (=std.process.Init=, =std.Io.File=,
-=std.Io.Writer.Allocating=) that don't exist on =0.15= or older.
-
-#+begin_src zig
-  const dep = b.dependency("zig_cli_kit", .{
-      .target = target,
-      .optimize = optimize,
-  });
-  exe.root_module.addImport("zig-cli-kit", dep.module("zig-cli-kit"));
-#+end_src
-
-** 🔧 Development
+*** Development
 
 #+begin_src sh
   direnv allow      # or: nix develop
@@ -271,12 +279,6 @@ version — exposed alongside =zig-0.16= (the 0.16.0 baseline) via zignix's
 =flake.lock=. Bump it with =nix flake update zignix=.
 
 #+html:</details>
-
-** 🚧 Status
-
-Early extraction. The API is unstable and will change while downstream
-tools adopt it. Targets the current Zig =0.17= development line while
-preserving =0.16.0= compatibility until 0.17 becomes the baseline.
 
 ** 📄 License
 
