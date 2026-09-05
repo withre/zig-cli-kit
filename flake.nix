@@ -41,7 +41,6 @@
           pkgs = import inputs.nixpkgs { inherit system; };
         in {
           zig-cli-kit-test = import ./nix/checks/zig-cli-kit-test { inherit pkgs inputs system; };
-          zig-cli-kit-test-zig-master = import ./nix/checks/zig-cli-kit-test-zig-master { inherit pkgs inputs system; };
         });
     };
 }

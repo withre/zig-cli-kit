@@ -1,19 +1,11 @@
-{ inputs, system, channel ? "0.16" }:
+{ inputs, system }:
 
 # Zig toolchain used by this project, pinned through zignix.
 #
-# The project target is the Zig 0.17 development line (`channel = "master"`).
-# The devshell uses it as the primary `zig` on PATH (see ./devshell.nix);
-# `channel = "0.16"` selects the latest 0.16 release and remains the
-# deployment-compatible baseline for `nix build` consumers until 0.17.0 is
-# released. Both packages are maintained by zignix and pinned via flake.lock
-# so each channel is reproducible. Bump them with `nix flake update zignix`.
-
-let
-  packages = inputs.zignix.packages.${system};
-  byChannel = {
-    "0.16" = packages.zig-0_16;
-    "master" = packages.zig-master;
-  };
-in
-byChannel.${channel}
+# The project tracks the Zig `master` nightly (the 0.17 development line)
+# as its single toolchain: `minimum_zig_version` in build.zig.zon is set to
+# the exact nightly zignix's `zig-master` resolves to, and the devshell,
+# package, and check all use that same binary. The revision is pinned via
+# flake.lock; bump it with `nix flake update zignix` and then raise
+# `minimum_zig_version` to match `zig version`.
+inputs.zignix.packages.${system}.zig-master

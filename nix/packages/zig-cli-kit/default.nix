@@ -16,13 +16,12 @@ pkgs.stdenv.mkDerivation {
   buildPhase = ''
     runHook preBuild
 
-    export XDG_CACHE_HOME="$TMPDIR/cache"
-    mkdir -p "$XDG_CACHE_HOME"
+    # `zig build` no longer takes --global-cache-dir; the env var is the
+    # supported override (see `zig env`). --cache-dir is still a flag.
+    export ZIG_GLOBAL_CACHE_DIR="$TMPDIR/zig-global-cache"
+    mkdir -p "$ZIG_GLOBAL_CACHE_DIR"
 
-    zig build \
-      --cache-dir "$TMPDIR/zig-cache" \
-      --global-cache-dir "$TMPDIR/zig-global-cache" \
-      -Doptimize=ReleaseSafe
+    zig build --cache-dir "$TMPDIR/zig-cache" -Doptimize=ReleaseSafe
 
     runHook postBuild
   '';
