@@ -18,9 +18,10 @@
 ** 🌄 Overview
 
 *zig-cli-kit* defines command-line interfaces as declarative data and hands
-them to =App.run=. It targets the Zig =0.17= development line and keeps Zig
-=0.16.0= green as the deployment baseline. The API is built around =std.Io=
-/ =std.process.Init=; nothing here predates Zig 0.16.
+them to =App.run=. It tracks the Zig =master= nightly (the =0.17=
+development line) as its single toolchain; =minimum_zig_version= in
+=build.zig.zon= names the exact nightly it is built and tested against.
+The API is built around =std.Io= / =std.process.Init=.
 
 The library never calls =std.process.exit= or =std.debug.print= — all
 output goes through writers the caller supplies, and parse failures come
@@ -101,9 +102,9 @@ Kept as a buildable example at [[file:examples/hello/src/main.zig][=examples/hel
   zig build run -- --help
 #+end_src
 
-The Zig 0.16+ "juicy =main=" entry point passes a pre-initialised
-=std.process.Init= with allocator, IO, args, and the environment block.
-The library consumes it directly, and this stays the target shape for 0.17.
+The "juicy =main=" entry point passes a pre-initialised =std.process.Init=
+with allocator, IO, args, and the environment block. The library consumes
+it directly.
 
 #+begin_src zig
   const std = @import("std");
@@ -148,35 +149,20 @@ The library consumes it directly, and this stays the target shape for 0.17.
           init.io,
           &stdout.interface,
           &stderr.interface,
-          environBlockPtr(init.minimal.environ.block),
+          // On POSIX the raw environment is `std.process.Environ.PosixBlock`,
+          // whose `slice` is the null-terminated block the library reads.
+          init.minimal.environ.block.slice.ptr,
           args.items,
       ) catch |err| switch (err) {
           error.OutOfMemory => return err,
           else => std.process.exit(1),
       };
   }
-
-  fn environBlockPtr(block: anytype) [*:null]const ?[*:0]const u8 {
-      const T = @TypeOf(block);
-      switch (@typeInfo(T)) {
-          .pointer => |ptr| {
-              if (ptr.size == .slice) return block.ptr;
-          },
-          .@"struct" => {
-              if (@hasField(T, "slice")) return block.slice.ptr;
-          },
-          else => {},
-      }
-      return block.ptr;
-  }
 #+end_src
 
-The =init.minimal.environ.block= representation has drifted across
-0.16/0.17 snapshots: some expose =block.slice.ptr=, others =block.ptr=. The
-tiny helper above adapts either to the many-item pointer the library wants.
-On platforms without a raw environment block (WASI without libc, Windows),
-pass any null-terminated =[*:null]const ?[*:0]const u8= you own — env
-binding simply finds nothing.
+On platforms without a raw environment block (WASI without libc, Windows,
+where =environ.block= is a =GlobalBlock=), pass any null-terminated
+=[*:null]const ?[*:0]const u8= you own — env binding simply finds nothing.
 
 #+html:</details>
 
@@ -185,9 +171,9 @@ binding simply finds nothing.
 *** Installation
 
 Add this repository to your =build.zig.zon=, then import the module from
-=build.zig=. Target Zig =0.17= development for new work; =0.16.0= is the
-minimum baseline. The library uses APIs (=std.process.Init=, =std.Io.File=,
-=std.Io.Writer.Allocating=) that don't exist on =0.15= or older.
+=build.zig=. Your project's Zig must satisfy the kit's =minimum_zig_version=
+— the exact =master= nightly it is built against — so consume it with the
+same nightly (the flake's =zig-master= from zignix is the reference).
 
 #+begin_src zig
   const dep = b.dependency("zig_cli_kit", .{
@@ -200,8 +186,8 @@ minimum baseline. The library uses APIs (=std.process.Init=, =std.Io.File=,
 *** Status
 
 Early extraction. The API is unstable and will change while downstream
-tools adopt it. Targets the current Zig =0.17= development line while
-preserving =0.16.0= compatibility until 0.17 becomes the baseline.
+tools adopt it. Tracks the Zig =master= nightly; there is no older
+baseline kept green.
 
 *** Error Handling
 
@@ -252,7 +238,9 @@ A caller that wants specific parse exits can match the names:
   nix flake check
 #+end_src
 
-With direnv (or =nix develop=) the flake pins Zig via =nix/zig.nix=.
+With direnv (or =nix develop=) the flake pins Zig via =nix/zig.nix=. To
+bump the toolchain: =nix flake update zignix=, then set
+=minimum_zig_version= in =build.zig.zon= to the new =zig version=.
 
 #+html:<details>
 #+html:<summary><b>❄️ Nix layout</b></summary>
@@ -267,16 +255,14 @@ Nix code is kept separate from Zig code and small.
   │   ├── zig.nix
   │   ├── devshell.nix
   │   ├── checks/zig-cli-kit-test/default.nix
-  │   ├── checks/zig-cli-kit-test-zig-master/default.nix
   │   └── packages/zig-cli-kit/default.nix
   └── src/
 #+end_example
 
-Zig comes from [[https://github.com/withre/zignix][=zignix=]]. The default =zig= in the devshell is the
-unreleased Zig =0.17= development line (zignix =zig-master=) — the target
-version — exposed alongside =zig-0.16= (the 0.16.0 baseline) via zignix's
-=withName=. zignix keeps both packages current; the revision is pinned in
-=flake.lock=. Bump it with =nix flake update zignix=.
+Zig comes from [[https://github.com/withre/zignix][=zignix=]]'s =zig-master= package — the current =master=
+nightly — and that one binary serves the devshell, the package, and the
+check. zignix keeps =zig-master= current; the revision is pinned in
+=flake.lock=.
 
 #+html:</details>
 
