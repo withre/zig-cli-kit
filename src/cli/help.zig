@@ -53,9 +53,9 @@ pub fn printCommandHelp(
 /// Root help with an explicit palette and width. This is the layer tests
 /// pin: output depends only on the arguments, never on the environment.
 pub fn renderRootHelp(w: *Writer, app: *const App, p: Palette, width: usize) Writer.Error!void {
-    try w.print("{s}{s}{s} — {s}{s}{s}\n\n", .{
-        p.title, app.name, p.reset, p.desc, app.description, p.reset,
-    });
+    // The description beside the title is the app's one-line pitch: body
+    // text, not a dimmed annotation.
+    try w.print("{s}{s}{s} — {s}\n\n", .{ p.title, app.name, p.reset, app.description });
     try w.print("Usage: {s} [global options] <command> [options]\n", .{app.name});
 
     try printFlagTable(w, "Global Flags", app.global_flags, p, width);
@@ -66,8 +66,10 @@ pub fn renderRootHelp(w: *Writer, app: *const App, p: Palette, width: usize) Wri
         for (app.help_sections) |sec| try printHelpSection(w, app, sec, p, width);
     }
 
-    try w.print("\n{s}Run '{s} <command> --help' for more information.{s}\n", .{
-        p.desc, app.name, p.reset,
+    // Body text, with the invocation styled like a command so it reads as
+    // something to type rather than as a dimmed footnote.
+    try w.print("\nRun '{s}{s} <command> --help{s}' for more information.\n", .{
+        p.cmd, app.name, p.reset,
     });
 }
 
@@ -184,12 +186,12 @@ fn printCmdAliases(w: *Writer, cmd: Command, p: Palette) Writer.Error!void {
 /// The "Run … --help" hint under a subcommand listing.
 fn printSubcommandHint(w: *Writer, app: *const App, cmd: Command, parent: []const u8, p: Palette) Writer.Error!void {
     if (parent.len > 0) {
-        try w.print("\n{s}Run '{s} {s} {s} <subcommand> --help' for details.{s}\n", .{
-            p.desc, app.name, parent, cmd.name, p.reset,
+        try w.print("\nRun '{s}{s} {s} {s} <subcommand> --help{s}' for details.\n", .{
+            p.cmd, app.name, parent, cmd.name, p.reset,
         });
     } else {
-        try w.print("\n{s}Run '{s} {s} <subcommand> --help' for details.{s}\n", .{
-            p.desc, app.name, cmd.name, p.reset,
+        try w.print("\nRun '{s}{s} {s} <subcommand> --help{s}' for details.\n", .{
+            p.cmd, app.name, cmd.name, p.reset,
         });
     }
 }

@@ -5,28 +5,33 @@
 //! output is not a terminal, giving automatic no-colour fallback.
 //!
 //! The default palette is deliberately the only palette: there is no
-//! theming, no configuration, and no env var beyond the TTY check. It is a
-//! two-tone scheme — primary orange for what the user *types* (app title,
-//! command names, section headings) and secondary blue for what the user
-//! *passes* (flags, environment variables) — with neutral greys for
-//! descriptions. Green is off-limits anywhere in the palette; the test at
-//! the bottom enforces that so a future colour cannot drift back to it.
+//! theming, no configuration, and no env var beyond the TTY check. Orange
+//! is the accent and is spent in exactly one place -- the app title -- so
+//! it stays an accent. Everything structural is blue in two shades: a
+//! deeper bold blue for section headings, a lighter blue for the things
+//! the user types (commands, flags, env names). Descriptions are a light
+//! neutral grey; body text such as the usage line and the closing hint is
+//! the terminal's own default. Green is off-limits anywhere in the
+//! palette; the test at the bottom enforces that so a future colour cannot
+//! drift back to it.
 
 const std = @import("std");
 const builtin = @import("builtin");
 
 // ── Raw escape sequences (private) ────────────────────────────────────
 
-// Primary: orange. Secondary: blue. Greys stay neutral (never green-
-// dominant). `required` is a warm accent that reads as a warning without
-// being confused for the orange primary.
-const esc_title = "\x1b[38;2;225;140;70m"; // rgb(225,140,70) — orange (primary)
-const esc_section = "\x1b[38;2;225;140;70m\x1b[1m"; // rgb(225,140,70) bold — orange (primary)
-const esc_cmd = "\x1b[38;2;225;140;70m"; // rgb(225,140,70) — orange (primary)
-const esc_desc = "\x1b[38;2;130;135;140m"; // rgb(130,135,140) — neutral grey
-const esc_flag = "\x1b[38;2;110;160;220m"; // rgb(110,160,220) — blue (secondary)
-const esc_flag_desc = "\x1b[38;2;100;105;110m"; // rgb(100,105,110) — dim neutral grey
-const esc_env = "\x1b[38;2;110;160;220m"; // rgb(110,160,220) — blue (secondary)
+// Orange accent (title only); deep blue for headings; light blue for
+// commands, flags and env names alike -- they are all "things you type",
+// so they share one colour. Greys stay neutral (never green-dominant) and
+// light enough to read against a dark background. `required` is a warm
+// accent that reads as a warning without competing with the title.
+const esc_title = "\x1b[38;2;225;140;70m"; // rgb(225,140,70) — orange accent
+const esc_section = "\x1b[38;2;110;160;220m\x1b[1m"; // rgb(110,160,220) bold — deep blue
+const esc_cmd = "\x1b[38;2;150;195;240m"; // rgb(150,195,240) — light blue
+const esc_desc = "\x1b[38;2;175;180;185m"; // rgb(175,180,185) — light neutral grey
+const esc_flag = "\x1b[38;2;150;195;240m"; // rgb(150,195,240) — light blue
+const esc_flag_desc = "\x1b[38;2;155;160;165m"; // rgb(155,160,165) — neutral grey
+const esc_env = "\x1b[38;2;150;195;240m"; // rgb(150,195,240) — light blue
 const esc_required = "\x1b[38;2;180;130;100m"; // rgb(180,130,100) — muted terracotta (warm accent)
 const esc_reset = "\x1b[0m"; // reset all attributes
 
@@ -183,16 +188,14 @@ test "no palette escape is green-dominant" {
     }
 }
 
-test "primary is orange, secondary is blue" {
+test "orange is the title only; structure is blue; commands and flags share a colour" {
     const p = palette_colour;
-    // Primary (title / section / cmd): red-led, blue-poor.
-    inline for (.{ p.title, p.section, p.cmd }) |esc| {
-        const c = truecolourOf(esc).?;
-        try std.testing.expect(c.r > c.g and c.g > c.b);
-    }
-    // Secondary (flag / env): blue-led.
-    inline for (.{ p.flag, p.env }) |esc| {
+    const t = truecolourOf(p.title).?;
+    try std.testing.expect(t.r > t.g and t.g > t.b);
+    inline for (.{ p.section, p.cmd, p.flag, p.env }) |esc| {
         const c = truecolourOf(esc).?;
         try std.testing.expect(c.b > c.g and c.b > c.r);
     }
+    try std.testing.expectEqualStrings(p.cmd, p.flag);
+    try std.testing.expectEqualStrings(p.cmd, p.env);
 }
