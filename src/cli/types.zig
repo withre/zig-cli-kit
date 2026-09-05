@@ -91,11 +91,17 @@ pub const HelpEntry = struct {
 
 /// Blocks of the root help screen, in the order they should appear.
 /// A block left out of `HelpLayout.root` is not rendered.
-pub const RootBlock = enum {
+pub const RootBlock = union(enum) {
     /// `Global Flags:` table.
     global_flags,
-    /// `Commands:` table, or the app's `help_sections` when it has any.
+    /// `Commands:` table when the app has no `help_sections`; otherwise
+    /// every help section that is not placed individually by a
+    /// `.section` block, in declaration order.
     commands,
+    /// One help section, placed by title. Lets an app interleave other
+    /// blocks between its sections. A title that matches no section is
+    /// skipped; `App.validateHelpLayout` turns that into an error.
+    section: []const u8,
     /// The closing `Run '<app> <command> --help' ...` line.
     hint,
 };
@@ -118,7 +124,9 @@ pub const HelpLayout = struct {
     root: []const RootBlock = &default_root,
     command: []const CommandBlock = &default_command,
 
-    pub const default_root = [_]RootBlock{ .global_flags, .commands, .hint };
+    /// Commands first: they are what a reader opens `--help` to find.
+    /// Global flags follow, then the hint.
+    pub const default_root = [_]RootBlock{ .commands, .global_flags, .hint };
     pub const default_command = [_]CommandBlock{ .aliases, .subcommands, .arguments, .flags, .global_flags };
 };
 
@@ -297,6 +305,31 @@ pub const App = struct {
     commands: []const Command = &.{},
     help_sections: []const HelpSection = &.{},
     help_layout: HelpLayout = .{},
+
+    /// Check that every `.section` block in `help_layout.root` names an
+    /// existing help section exactly once. Rendering skips a bad block
+    /// silently, so call this where the mistake can be loud -- in a test,
+    /// or at comptime for a `const` app:
+    ///
+    ///     comptime app.validateHelpLayout() catch unreachable;
+    pub fn validateHelpLayout(self: *const App) error{ UnknownSection, DuplicateSection }!void {
+        for (self.help_layout.root, 0..) |block, i| {
+            const title = switch (block) {
+                .section => |t| t,
+                else => continue,
+            };
+            if (!self.hasSection(title)) return error.UnknownSection;
+            for (self.help_layout.root[0..i]) |earlier| switch (earlier) {
+                .section => |t| if (std.mem.eql(u8, t, title)) return error.DuplicateSection,
+                else => {},
+            };
+        }
+    }
+
+    fn hasSection(self: *const App, title: []const u8) bool {
+        for (self.help_sections) |sec| if (std.mem.eql(u8, sec.title, title)) return true;
+        return false;
+    }
 
     /// Parse arguments and dispatch to the matched command handler.
     ///

@@ -65,7 +65,14 @@ pub fn renderRootHelp(w: *Writer, app: *const App, p: Palette, width: usize) Wri
         .commands => if (app.help_sections.len == 0) {
             try printCommandTable(w, "Commands", app.commands, p, width);
         } else {
-            for (app.help_sections) |sec| try printHelpSection(w, app, sec, p, width);
+            // Sections placed individually by a `.section` block are
+            // theirs to render; everything else lands here in order.
+            for (app.help_sections) |sec| {
+                if (!placedByTitle(app, sec.title)) try printHelpSection(w, app, sec, p, width);
+            }
+        },
+        .section => |title| for (app.help_sections) |sec| {
+            if (std.mem.eql(u8, sec.title, title)) try printHelpSection(w, app, sec, p, width);
         },
         // Body text, with the invocation styled like a command so it
         // reads as something to type rather than as a dimmed footnote.
@@ -90,6 +97,14 @@ fn printHelpSection(w: *Writer, app: *const App, sec: HelpSection, p: Palette, w
         if (findCommand(app.commands, name)) |cmd| try table.commandRow(w, cmd, p);
     }
     for (sec.entries) |entry| try table.entryRow(w, entry, p);
+}
+
+fn placedByTitle(app: *const App, title: []const u8) bool {
+    for (app.help_layout.root) |block| switch (block) {
+        .section => |t| if (std.mem.eql(u8, t, title)) return true,
+        else => {},
+    };
+    return false;
 }
 
 fn findCommand(commands: []const Command, name: []const u8) ?Command {
@@ -720,10 +735,6 @@ test "golden: twelve-command root help at 100 columns" {
         \\
         \\Usage: ref [global options] <command> [options]
         \\
-        \\Global Flags:
-        \\  -v, --verbose          Print each step
-        \\  -c, --config <CONFIG>  Config file to read (default: ref.toml) [$REF_CONFIG]
-        \\
         \\Commands:
         \\  add      <FILE> <SOURCE>  Insert a new ref: marker, then sync it
         \\  sync     <FILE...>        Resolve sources and update marked regions in place
@@ -737,6 +748,10 @@ test "golden: twelve-command root help at 100 columns" {
         \\  pin      <FILE...>        Set a ref's desired version (--to / --unpin)
         \\  inspect  <FILE>           Dump parsed refs and diagnostics
         \\  doctor   <FILE>           Report stale residue, missing fences, orphans
+        \\
+        \\Global Flags:
+        \\  -v, --verbose          Print each step
+        \\  -c, --config <CONFIG>  Config file to read (default: ref.toml) [$REF_CONFIG]
         \\
         \\Run 'ref <command> --help' for more information.
         \\
@@ -905,8 +920,40 @@ test "help_layout reorders root blocks and omits unlisted ones" {
 
     var app = twelve;
     app.commands = app.commands[0..2];
-    // Commands first, global flags after, no closing hint.
-    app.help_layout = .{ .root = &.{ .commands, .global_flags } };
+    // Global flags first, commands after, no closing hint.
+    app.help_layout = .{ .root = &.{ .global_flags, .commands } };
+    try renderRootHelp(&aw.writer, &app, plain, 100);
+
+    const want =
+        \\ref — keep marked regions in sync with their sources
+        \\
+        \\Usage: ref [global options] <command> [options]
+        \\
+        \\Global Flags:
+        \\  -v, --verbose          Print each step
+        \\  -c, --config <CONFIG>  Config file to read (default: ref.toml) [$REF_CONFIG]
+        \\
+        \\Commands:
+        \\  add   <FILE> <SOURCE>  Insert a new ref: marker, then sync it
+        \\  sync  <FILE...>        Resolve sources and update marked regions in place
+        \\
+    ;
+    try testing.expectEqualStrings(want, aw.writer.buffered());
+}
+
+test "help_layout .section places one section by title; .commands renders the rest" {
+    var aw: Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+
+    var app = twelve;
+    app.global_flags = app.global_flags[0..1];
+    app.help_sections = &.{
+        .{ .title = "Commands", .commands = &.{ "add", "sync" } },
+        .{ .title = "Markers", .entries = &.{.{ .label = "# ref:end", .description = "the fence ref writes and owns" }} },
+    };
+    // ref's order: Commands, Global Flags, Markers, hint.
+    app.help_layout = .{ .root = &.{ .commands, .global_flags, .{ .section = "Markers" }, .hint } };
+    try app.validateHelpLayout();
     try renderRootHelp(&aw.writer, &app, plain, 100);
 
     const want =
@@ -919,11 +966,45 @@ test "help_layout reorders root blocks and omits unlisted ones" {
         \\  sync  <FILE...>        Resolve sources and update marked regions in place
         \\
         \\Global Flags:
-        \\  -v, --verbose          Print each step
-        \\  -c, --config <CONFIG>  Config file to read (default: ref.toml) [$REF_CONFIG]
+        \\  -v, --verbose  Print each step
+        \\
+        \\Markers:
+        \\  # ref:end  the fence ref writes and owns
+        \\
+        \\Run 'ref <command> --help' for more information.
         \\
     ;
     try testing.expectEqualStrings(want, aw.writer.buffered());
+}
+
+test "help_layout .section with an unknown or repeated title is skipped by the renderer and caught by validateHelpLayout" {
+    var aw: Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+
+    var app = twelve;
+    app.global_flags = &.{};
+    app.help_sections = &.{.{ .title = "Markers", .entries = &.{.{ .label = "# ref:end", .description = "fence" }} }};
+
+    app.help_layout = .{ .root = &.{.{ .section = "Nope" }} };
+    try testing.expectError(error.UnknownSection, app.validateHelpLayout());
+    try renderRootHelp(&aw.writer, &app, plain, 100);
+    try testing.expect(std.mem.indexOf(u8, aw.writer.buffered(), "Nope") == null);
+    try testing.expect(std.mem.indexOf(u8, aw.writer.buffered(), "Markers") == null);
+
+    app.help_layout = .{ .root = &.{ .{ .section = "Markers" }, .{ .section = "Markers" } } };
+    try testing.expectError(error.DuplicateSection, app.validateHelpLayout());
+
+    app.help_layout = .{ .root = &.{ .commands, .{ .section = "Markers" } } };
+    try app.validateHelpLayout();
+}
+
+test "validateHelpLayout is usable at comptime on a const app" {
+    const app: App = .{
+        .name = "t",
+        .help_sections = &.{.{ .title = "Markers", .entries = &.{.{ .label = "x", .description = "y" }} }},
+        .help_layout = .{ .root = &.{ .commands, .{ .section = "Markers" }, .hint } },
+    };
+    comptime app.validateHelpLayout() catch unreachable;
 }
 
 test "help_layout reorders command blocks; parents still hide their own args and flags" {

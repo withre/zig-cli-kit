@@ -47,7 +47,7 @@ the Zig stdlib, no generated command layer, no ambition to become Zig's
 - Did-you-mean suggestions for commands and flags (recurses into subcommands)
 - Negatable boolean flags (=--no-X=)
 - Help laid out as computed columns (name | positional args | description) with descriptions wrapped to the terminal width; the args column comes from each command's =ArgDef=s, so it never drifts from what the parser accepts
-- Custom help sections list commands by name (=HelpSection.commands=) or carry free-form rows (=HelpSection.entries=); =App.help_layout= reorders or omits the blocks of the root and command help screens
+- Custom help sections list commands by name (=HelpSection.commands=) or carry free-form rows (=HelpSection.entries=); =App.help_layout= reorders or omits the blocks of the root and command help screens, including placing a single section by title (=.{ .section = "Markers" }=)
 - TTY-aware colour: an orange accent (the title), teal headings, soft aqua for commands, flags and env names; plain output when not a tty
 
 ** 🚀 Quick Start
