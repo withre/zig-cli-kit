@@ -22,16 +22,11 @@ pub fn build(b: *std.Build) void {
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    addPassthruArgs(b, run_cmd);
+    // Forward `zig build run -- <args>` to the executable. Since the
+    // 2026-05-26 build-system rework, build scripts can no longer observe
+    // `b.args`; this is the replacement.
+    run_cmd.addPassthruArgs();
 
     const run_step = b.step("run", "Run the hello example");
     run_step.dependOn(&run_cmd.step);
-}
-
-fn addPassthruArgs(b: *std.Build, run: *std.Build.Step.Run) void {
-    if (@hasDecl(std.Build.Step.Run, "addPassthruArgs")) {
-        run.addPassthruArgs();
-    } else if (b.args) |args| {
-        run.addArgs(args);
-    }
 }

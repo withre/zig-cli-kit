@@ -65,24 +65,14 @@ pub fn main(init: std.process.Init) !void {
         init.io,
         &stdout.interface,
         &stderr.interface,
-        environBlockPtr(init.minimal.environ.block),
+        // On POSIX the raw environment is `std.process.Environ.PosixBlock`,
+        // whose `slice` is the null-terminated block the library reads.
+        // On Windows / WASI-without-libc there is no raw block; pass any
+        // `[*:null]const ?[*:0]const u8` you own and env binding finds nothing.
+        init.minimal.environ.block.slice.ptr,
         args.items,
     ) catch |err| switch (err) {
         error.OutOfMemory => return err,
         else => std.process.exit(1),
     };
-}
-
-fn environBlockPtr(block: anytype) [*:null]const ?[*:0]const u8 {
-    const T = @TypeOf(block);
-    switch (@typeInfo(T)) {
-        .pointer => |ptr| {
-            if (ptr.size == .slice) return block.ptr;
-        },
-        .@"struct" => {
-            if (@hasField(T, "slice")) return block.slice.ptr;
-        },
-        else => {},
-    }
-    return block.ptr;
 }
