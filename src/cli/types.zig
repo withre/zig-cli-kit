@@ -89,6 +89,39 @@ pub const HelpEntry = struct {
     description: []const u8,
 };
 
+/// Blocks of the root help screen, in the order they should appear.
+/// A block left out of `HelpLayout.root` is not rendered.
+pub const RootBlock = enum {
+    /// `Global Flags:` table.
+    global_flags,
+    /// `Commands:` table, or the app's `help_sections` when it has any.
+    commands,
+    /// The closing `Run '<app> <command> --help' ...` line.
+    hint,
+};
+
+/// Blocks of a command's help screen, in the order they should appear.
+/// A block left out of `HelpLayout.command` is not rendered. Blocks with
+/// nothing to show (no aliases, no flags, ...) are skipped regardless.
+pub const CommandBlock = enum {
+    aliases,
+    /// `Subcommands:` table plus its `Run ... --help` hint.
+    subcommands,
+    arguments,
+    flags,
+    global_flags,
+};
+
+/// Order of blocks in help output. The defaults reproduce the layout the
+/// kit has always printed; override either slice to reorder or omit.
+pub const HelpLayout = struct {
+    root: []const RootBlock = &default_root,
+    command: []const CommandBlock = &default_command,
+
+    pub const default_root = [_]RootBlock{ .global_flags, .commands, .hint };
+    pub const default_command = [_]CommandBlock{ .aliases, .subcommands, .arguments, .flags, .global_flags };
+};
+
 // ── Error Set ──────────────────────────────────────────────────────────
 
 /// Errors that `App.run` can return.
@@ -263,6 +296,7 @@ pub const App = struct {
     global_flags: []const FlagDef = &.{},
     commands: []const Command = &.{},
     help_sections: []const HelpSection = &.{},
+    help_layout: HelpLayout = .{},
 
     /// Parse arguments and dispatch to the matched command handler.
     ///

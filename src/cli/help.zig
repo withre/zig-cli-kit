@@ -60,19 +60,19 @@ pub fn renderRootHelp(w: *Writer, app: *const App, p: Palette, width: usize) Wri
     // first, so it takes the description grey.
     try w.print("{s}Usage: {s} [global options] <command> [options]{s}\n", .{ p.desc, app.name, p.reset });
 
-    try printFlagTable(w, "Global Flags", app.global_flags, p, width);
-
-    if (app.help_sections.len == 0) {
-        try printCommandTable(w, "Commands", app.commands, p, width);
-    } else {
-        for (app.help_sections) |sec| try printHelpSection(w, app, sec, p, width);
-    }
-
-    // Body text, with the invocation styled like a command so it reads as
-    // something to type rather than as a dimmed footnote.
-    try w.print("\nRun '{s}{s} <command> --help{s}' for more information.\n", .{
-        p.cmd, app.name, p.reset,
-    });
+    for (app.help_layout.root) |block| switch (block) {
+        .global_flags => try printFlagTable(w, "Global Flags", app.global_flags, p, width),
+        .commands => if (app.help_sections.len == 0) {
+            try printCommandTable(w, "Commands", app.commands, p, width);
+        } else {
+            for (app.help_sections) |sec| try printHelpSection(w, app, sec, p, width);
+        },
+        // Body text, with the invocation styled like a command so it
+        // reads as something to type rather than as a dimmed footnote.
+        .hint => try w.print("\nRun '{s}{s} <command> --help{s}' for more information.\n", .{
+            p.cmd, app.name, p.reset,
+        }),
+    };
 }
 
 /// One custom section: command rows (resolved by name from `app.commands`)
@@ -110,17 +110,22 @@ pub fn renderCommandHelp(
 ) Writer.Error!void {
     try printCmdDescription(w, cmd, parent_name, p);
     try printCmdUsage(w, app, cmd, parent_name, p);
-    try printCmdAliases(w, cmd, p);
 
-    if (cmd.subcommands.len > 0) {
-        try printCommandTable(w, "Subcommands", cmd.subcommands, p, width);
-        try printSubcommandHint(w, app, cmd, parent_name, p);
-        return;
-    }
-
-    try printArgTable(w, cmd.args, p, width);
-    try printFlagTable(w, "Flags", cmd.flags, p, width);
-    try printFlagTable(w, "Global Flags", app.global_flags, p, width);
+    // A command with subcommands is a router: its own arguments and flags
+    // are never parsed (resolution descends first), so those blocks stay
+    // silent for it whatever the layout says. Global flags do apply
+    // through it and follow the layout.
+    const is_parent = cmd.subcommands.len > 0;
+    for (app.help_layout.command) |block| switch (block) {
+        .aliases => try printCmdAliases(w, cmd, p),
+        .subcommands => if (is_parent) {
+            try printCommandTable(w, "Subcommands", cmd.subcommands, p, width);
+            try printSubcommandHint(w, app, cmd, parent_name, p);
+        },
+        .arguments => if (!is_parent) try printArgTable(w, cmd.args, p, width),
+        .flags => if (!is_parent) try printFlagTable(w, "Flags", cmd.flags, p, width),
+        .global_flags => try printFlagTable(w, "Global Flags", app.global_flags, p, width),
+    };
 }
 
 /// Print the one-line command description.
@@ -889,6 +894,74 @@ test "command help: subcommand and flag tables use computed widths" {
         \\
         \\Global Flags:
         \\  -v, --verbose  Print each step
+        \\
+    ;
+    try testing.expectEqualStrings(want, aw.writer.buffered());
+}
+
+test "help_layout reorders root blocks and omits unlisted ones" {
+    var aw: Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+
+    var app = twelve;
+    app.commands = app.commands[0..2];
+    // Commands first, global flags after, no closing hint.
+    app.help_layout = .{ .root = &.{ .commands, .global_flags } };
+    try renderRootHelp(&aw.writer, &app, plain, 100);
+
+    const want =
+        \\ref — keep marked regions in sync with their sources
+        \\
+        \\Usage: ref [global options] <command> [options]
+        \\
+        \\Commands:
+        \\  add   <FILE> <SOURCE>  Insert a new ref: marker, then sync it
+        \\  sync  <FILE...>        Resolve sources and update marked regions in place
+        \\
+        \\Global Flags:
+        \\  -v, --verbose          Print each step
+        \\  -c, --config <CONFIG>  Config file to read (default: ref.toml) [$REF_CONFIG]
+        \\
+    ;
+    try testing.expectEqualStrings(want, aw.writer.buffered());
+}
+
+test "help_layout reorders command blocks; parents still hide their own args and flags" {
+    var aw: Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+
+    const app: App = .{
+        .name = "t",
+        .global_flags = &.{.{ .name = "verbose", .short = 'v', .takes_value = false, .description = "Print each step" }},
+        // Global flags first, then subcommands; aliases dropped.
+        .help_layout = .{ .command = &.{ .global_flags, .subcommands, .flags } },
+    };
+    const parent: Command = .{
+        .name = "topic",
+        .description = "Manage topics",
+        .aliases = &.{"t"},
+        .flags = &.{.{ .name = "never-shown", .takes_value = false, .description = "parent flags are not parsed" }},
+        .subcommands = &.{
+            .{ .name = "list", .description = "List topics" },
+            .{ .name = "add", .args = &.{.{ .name = "name", .required = true }}, .description = "Add a topic" },
+        },
+    };
+    try renderCommandHelp(&aw.writer, &app, parent, "", plain, 100);
+
+    const want =
+        \\topic — Manage topics
+        \\
+        \\Usage:
+        \\  t topic <subcommand> [OPTIONS]
+        \\
+        \\Global Flags:
+        \\  -v, --verbose  Print each step
+        \\
+        \\Subcommands:
+        \\  list          List topics
+        \\  add   <NAME>  Add a topic
+        \\
+        \\Run 't topic <subcommand> --help' for details.
         \\
     ;
     try testing.expectEqualStrings(want, aw.writer.buffered());
