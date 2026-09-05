@@ -353,54 +353,65 @@ const Table = struct {
     /// Word-wrap `segs` into the description column, starting at the
     /// current cursor (already at `descCol`), and end the row.
     fn description(t: Table, w: *Writer, segs: []const Segment, p: Palette) Writer.Error!void {
-        const start = t.descCol();
-        const limit = t.wrapWidth();
-        var col: usize = start;
-        var line_has_text = false;
+        var cur: Cursor = .{ .start = t.descCol(), .limit = t.wrapWidth() };
+        cur.col = cur.start;
 
+        // One SGR pair per segment, not per word: open before the first
+        // token, close after the last, and re-open only when a line break
+        // interrupts the run. Per-word pairs tripled the byte count of a
+        // coloured screen for no visible difference.
         for (segs) |seg| {
+            try w.writeAll(seg.colour);
             if (seg.atomic) {
-                try placeToken(w, seg.parts(), seg.width(), seg.colour, p, start, limit, &col, &line_has_text);
+                try cur.place(w, seg.parts(), seg.width(), seg.colour, p);
             } else {
                 var words = std.mem.tokenizeScalar(u8, seg.a, ' ');
                 while (words.next()) |word| {
-                    try placeToken(w, .{ word, "", "" }, word.len, seg.colour, p, start, limit, &col, &line_has_text);
+                    try cur.place(w, .{ word, "", "" }, word.len, seg.colour, p);
                 }
             }
+            try w.writeAll(p.reset);
         }
         try w.writeAll("\n");
     }
 
-    /// Emit one unbreakable token, moving to a continuation line first if
-    /// it would cross `limit`. A token wider than the whole column is
-    /// written anyway rather than dropped.
-    fn placeToken(
-        w: *Writer,
-        parts: [3][]const u8,
-        token_w: usize,
-        token_colour: []const u8,
-        p: Palette,
+    /// Wrapping state for one description cell.
+    const Cursor = struct {
         start: usize,
         limit: usize,
-        col: *usize,
-        line_has_text: *bool,
-    ) Writer.Error!void {
-        if (line_has_text.* and col.* + 1 + token_w > limit) {
-            try w.writeAll("\n");
-            try w.splatByteAll(' ', start);
-            col.* = start;
-            line_has_text.* = false;
+        col: usize = 0,
+        line_has_text: bool = false,
+
+        /// Emit one unbreakable token, moving to a continuation line first
+        /// if it would cross `limit`. A token wider than the whole column is
+        /// written anyway rather than dropped. The active colour is closed
+        /// before the break and re-opened after the indent so padding is
+        /// never inside an escape.
+        fn place(
+            c: *Cursor,
+            w: *Writer,
+            parts: [3][]const u8,
+            token_w: usize,
+            token_colour: []const u8,
+            p: Palette,
+        ) Writer.Error!void {
+            if (c.line_has_text and c.col + 1 + token_w > c.limit) {
+                try w.writeAll(p.reset);
+                try w.writeAll("\n");
+                try w.splatByteAll(' ', c.start);
+                try w.writeAll(token_colour);
+                c.col = c.start;
+                c.line_has_text = false;
+            }
+            if (c.line_has_text) {
+                try w.writeByte(' ');
+                c.col += 1;
+            }
+            for (parts) |part| try w.writeAll(part);
+            c.col += token_w;
+            c.line_has_text = true;
         }
-        if (line_has_text.*) {
-            try w.writeByte(' ');
-            col.* += 1;
-        }
-        try w.writeAll(token_colour);
-        for (parts) |part| try w.writeAll(part);
-        try w.writeAll(p.reset);
-        col.* += token_w;
-        line_has_text.* = true;
-    }
+    };
 };
 
 /// A run of description text with one colour. `atomic` runs are placed
@@ -896,8 +907,44 @@ test "colours land on name, args, and description separately" {
     };
     try renderRootHelp(&aw.writer, &app, p, 80);
     const out = aw.writer.buffered();
-    // Name in primary, args in secondary, description words in grey;
-    // padding is outside the escapes so widths stay exact.
-    try testing.expect(std.mem.indexOf(u8, out, "  <C>add</>  <F><FILE></>  <D>insert</> <D>one</>\n") != null);
+    // Name in primary, args in secondary, description in grey -- one
+    // escape pair per cell; padding is outside the escapes so widths stay
+    // exact.
+    try testing.expect(std.mem.indexOf(u8, out, "  <C>add</>  <F><FILE></>  <D>insert one</>\n") != null);
     try testing.expect(std.mem.indexOf(u8, out, "<S>Commands:</>") != null);
+}
+
+test "a wrapped cell opens its colour once per line, not once per word" {
+    var aw: Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+
+    const p: Palette = .{
+        .title = "",
+        .section = "",
+        .cmd = "<C>",
+        .desc = "<D>",
+        .flag = "",
+        .flag_desc = "",
+        .env = "",
+        .required = "",
+        .reset = "</>",
+    };
+    const app: App = .{
+        .name = "t",
+        .commands = &.{.{ .name = "sync", .description = "Resolve sources and update marked regions in place" }},
+    };
+    try renderRootHelp(&aw.writer, &app, p, 40);
+    const out = aw.writer.buffered();
+
+    // Description column is 8; 32 chars of room: two lines, so exactly two
+    // opens and two closes for eight words. The break sits outside the
+    // escapes so the continuation indent is plain spaces.
+    const want =
+        \\  <C>sync</>  <D>Resolve sources and update</>
+        \\        <D>marked regions in place</>
+        \\
+    ;
+    const from = std.mem.indexOf(u8, out, "  <C>sync").?;
+    try testing.expectEqualStrings(want, out[from .. from + want.len]);
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, out[from .. from + want.len], "<D>"));
 }
