@@ -468,6 +468,35 @@ test "App.run parses globals between parent and subcommand" {
     try std.testing.expectEqualStrings("9999", test_state.seen_port);
 }
 
+test "App.run parses globals after the subcommand" {
+    // A global flag is global: `demo topic list --port 9999` must work,
+    // not only `demo --port 9999 topic list`.
+    const allocator = std.testing.allocator;
+    test_state = .{};
+    var h = TestHarness.init(allocator);
+    defer h.deinit();
+
+    const app = App{
+        .name = "demo",
+        .global_flags = &.{.{ .name = "port", .description = "" }},
+        .commands = &.{.{
+            .name = "topic",
+            .subcommands = &.{.{ .name = "list", .run = testHandler }},
+        }},
+    };
+    try app.run(
+        allocator,
+        std.testing.io,
+        &h.out.writer,
+        &h.err.writer,
+        &.{},
+        &.{ "demo", "topic", "list", "--port", "9999" },
+    );
+
+    try std.testing.expect(test_state.handler_called);
+    try std.testing.expectEqualStrings("9999", test_state.seen_port);
+}
+
 test "App.run rejects unknown pre-command flags" {
     const allocator = std.testing.allocator;
     test_state = .{};

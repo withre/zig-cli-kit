@@ -56,7 +56,9 @@ pub fn renderRootHelp(w: *Writer, app: *const App, p: Palette, width: usize) Wri
     // The description beside the title is the app's one-line pitch: body
     // text, not a dimmed annotation.
     try w.print("{s}{s}{s} — {s}\n\n", .{ p.title, app.name, p.reset, app.description });
-    try w.print("Usage: {s} [global options] <command> [options]\n", .{app.name});
+    // The usage block is reference material, not the thing to read
+    // first, so it takes the description grey.
+    try w.print("{s}Usage: {s} [global options] <command> [options]{s}\n", .{ p.desc, app.name, p.reset });
 
     try printFlagTable(w, "Global Flags", app.global_flags, p, width);
 
@@ -136,25 +138,26 @@ fn printCmdDescription(w: *Writer, cmd: Command, parent: []const u8, p: Palette)
 
 /// Print the "Usage:" block for a command.
 fn printCmdUsage(w: *Writer, app: *const App, cmd: Command, parent: []const u8, p: Palette) Writer.Error!void {
-    try w.print("\nUsage:\n", .{});
+    try w.print("\n{s}Usage:{s}\n", .{ p.desc, p.reset });
     if (cmd.subcommands.len > 0) {
-        try printUsageWithSubcmds(w, app, cmd, parent);
+        try printUsageWithSubcmds(w, app, cmd, parent, p);
         return;
     }
     try printUsageLeaf(w, app, cmd, parent, p);
 }
 
 /// Usage line for a command that has subcommands.
-fn printUsageWithSubcmds(w: *Writer, app: *const App, cmd: Command, parent: []const u8) Writer.Error!void {
+fn printUsageWithSubcmds(w: *Writer, app: *const App, cmd: Command, parent: []const u8, p: Palette) Writer.Error!void {
     if (parent.len > 0) {
-        try w.print("  {s} {s} {s} <subcommand> [OPTIONS]\n", .{ app.name, parent, cmd.name });
+        try w.print("  {s}{s} {s} {s} <subcommand> [OPTIONS]{s}\n", .{ p.desc, app.name, parent, cmd.name, p.reset });
     } else {
-        try w.print("  {s} {s} <subcommand> [OPTIONS]\n", .{ app.name, cmd.name });
+        try w.print("  {s}{s} {s} <subcommand> [OPTIONS]{s}\n", .{ p.desc, app.name, cmd.name, p.reset });
     }
 }
 
 /// Usage line for a leaf command (no subcommands).
 fn printUsageLeaf(w: *Writer, app: *const App, cmd: Command, parent: []const u8, p: Palette) Writer.Error!void {
+    try w.writeAll(p.desc);
     if (parent.len > 0) {
         try w.print("  {s} {s} {s}", .{ app.name, parent, cmd.name });
     } else {
@@ -166,9 +169,12 @@ fn printUsageLeaf(w: *Writer, app: *const App, cmd: Command, parent: []const u8,
     for (cmd.args) |a| {
         try w.writeByte(' ');
         try writeArgToken(w, a, p);
+        // The arg token resets attributes; resume the dimmed usage text.
+        try w.writeAll(p.desc);
     }
 
     if (cmd.takes_rest) try w.writeAll(" [-- ARGS...]");
+    try w.writeAll(p.reset);
     try w.writeAll("\n");
 }
 

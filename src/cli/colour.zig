@@ -6,12 +6,13 @@
 //!
 //! The default palette is deliberately the only palette: there is no
 //! theming, no configuration, and no env var beyond the TTY check. Orange
-//! is the accent and is spent in exactly one place -- the app title -- so
-//! it stays an accent. Everything structural is blue in two shades: a
-//! deeper bold blue for section headings, a lighter blue for the things
-//! the user types (commands, flags, env names). Descriptions are a light
-//! neutral grey; body text such as the usage line and the closing hint is
-//! the terminal's own default. Green is off-limits anywhere in the
+//! is the accent: today it marks the app title, and it may be used for
+//! other emphasis later, but sparingly, so it keeps reading as an accent.
+//! Everything structural sits between blue and aqua:
+//! a bold teal for section headings and a soft aqua for the things the
+//! user types (commands, flags, env names). Descriptions and the usage
+//! block are a light neutral grey; the title description and the closing
+//! hint are the terminal's own default. Green is off-limits anywhere in the
 //! palette; the test at the bottom enforces that so a future colour cannot
 //! drift back to it.
 
@@ -20,18 +21,19 @@ const builtin = @import("builtin");
 
 // ── Raw escape sequences (private) ────────────────────────────────────
 
-// Orange accent (title only); deep blue for headings; light blue for
+// Orange accent (currently the title); teal for headings; a soft aqua for
 // commands, flags and env names alike -- they are all "things you type",
-// so they share one colour. Greys stay neutral (never green-dominant) and
+// so they share one colour. Aqua sits on the blue side of cyan (b > g)
+// on purpose: the green guard below would otherwise be right to object. Greys stay neutral (never green-dominant) and
 // light enough to read against a dark background. `required` is a warm
 // accent that reads as a warning without competing with the title.
-const esc_title = "\x1b[38;2;225;140;70m"; // rgb(225,140,70) — orange accent
-const esc_section = "\x1b[38;2;110;160;220m\x1b[1m"; // rgb(110,160,220) bold — deep blue
-const esc_cmd = "\x1b[38;2;150;195;240m"; // rgb(150,195,240) — light blue
+const esc_title = "\x1b[38;2;250;170;100m"; // rgb(250,170,100) — orange accent
+const esc_section = "\x1b[38;2;120;195;215m\x1b[1m"; // rgb(120,195,215) bold — teal
+const esc_cmd = "\x1b[38;2;185;225;235m"; // rgb(185,225,235) — soft aqua
 const esc_desc = "\x1b[38;2;175;180;185m"; // rgb(175,180,185) — light neutral grey
-const esc_flag = "\x1b[38;2;150;195;240m"; // rgb(150,195,240) — light blue
+const esc_flag = "\x1b[38;2;185;225;235m"; // rgb(185,225,235) — soft aqua
 const esc_flag_desc = "\x1b[38;2;155;160;165m"; // rgb(155,160,165) — neutral grey
-const esc_env = "\x1b[38;2;150;195;240m"; // rgb(150,195,240) — light blue
+const esc_env = "\x1b[38;2;185;225;235m"; // rgb(185,225,235) — soft aqua
 const esc_required = "\x1b[38;2;180;130;100m"; // rgb(180,130,100) — muted terracotta (warm accent)
 const esc_reset = "\x1b[0m"; // reset all attributes
 
@@ -188,7 +190,7 @@ test "no palette escape is green-dominant" {
     }
 }
 
-test "orange is the title only; structure is blue; commands and flags share a colour" {
+test "title is orange; structure is teal/aqua; commands and flags share a colour" {
     const p = palette_colour;
     const t = truecolourOf(p.title).?;
     try std.testing.expect(t.r > t.g and t.g > t.b);
