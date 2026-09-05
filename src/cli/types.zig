@@ -65,12 +65,25 @@ pub const Command = struct {
 // ── Help Layout ────────────────────────────────────────────────────────
 
 /// A titled section in the root help output (e.g. "Access", "Topic").
+///
+/// Rows come from two sources, rendered in this order:
+///
+/// - `commands`: names (or aliases) of entries in `App.commands`. Each row
+///   is laid out as name | positional args | description, with the args
+///   column derived from the command's `ArgDef`s -- so the label never has
+///   to be hand-written and cannot drift from what the parser accepts.
+/// - `entries`: free-form label/description rows for things that are not
+///   commands (marker syntax, environment notes, ...).
+///
+/// When `App.help_sections` is empty the root help prints a default
+/// `Commands:` section listing every `App.commands` entry instead.
 pub const HelpSection = struct {
     title: []const u8,
-    entries: []const HelpEntry,
+    commands: []const []const u8 = &.{},
+    entries: []const HelpEntry = &.{},
 };
 
-/// A single row in a help section.
+/// A single free-form row in a help section.
 pub const HelpEntry = struct {
     label: []const u8,
     description: []const u8,

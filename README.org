@@ -46,7 +46,9 @@ the Zig stdlib, no generated command layer, no ambition to become Zig's
 - =--= rest-argument capture
 - Did-you-mean suggestions for commands and flags (recurses into subcommands)
 - Negatable boolean flags (=--no-X=)
-- TTY-aware coloured help output
+- Help laid out as computed columns (name | positional args | description) with descriptions wrapped to the terminal width; the args column comes from each command's =ArgDef=s, so it never drifts from what the parser accepts
+- Custom help sections list commands by name (=HelpSection.commands=) or carry free-form rows (=HelpSection.entries=)
+- TTY-aware two-tone colour (orange primary for commands, blue secondary for flags and env); plain output when not a tty
 
 ** 🚀 Quick Start
 

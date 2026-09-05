@@ -13,6 +13,7 @@
 //! the bottom enforces that so a future colour cannot drift back to it.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 // ── Raw escape sequences (private) ────────────────────────────────────
 
@@ -79,6 +80,37 @@ pub fn isTty(io: std.Io) bool {
 /// Return the appropriate palette for the current output.
 pub fn detect(io: std.Io) Palette {
     return if (isTty(io)) palette_colour else palette_plain;
+}
+
+/// Width used when the terminal cannot be measured (not a tty, unsupported
+/// platform, or the query fails). 80 is the conventional minimum a help
+/// screen should read well at.
+pub const default_width: usize = 80;
+
+/// Column count of the terminal behind stdout, or `default_width`.
+///
+/// Goes through `io.operate(.device_io_control)` -- the same route
+/// `std.Progress` uses -- rather than calling ioctl directly, so embedders
+/// providing their own `std.Io` keep control of the query. Windows has a
+/// different console API and WASI has no terminal; both take the default.
+pub fn terminalWidth(io: std.Io) usize {
+    const file = std.Io.File.stdout();
+    const tty = file.isTty(io) catch return default_width;
+    if (!tty) return default_width;
+
+    switch (builtin.os.tag) {
+        .windows, .wasi => return default_width,
+        else => {
+            var ws: std.posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
+            const result = io.operate(.{ .device_io_control = .{
+                .file = file,
+                .code = std.posix.T.IOCGWINSZ,
+                .arg = &ws,
+            } }) catch return default_width;
+            if (result.device_io_control < 0 or ws.col == 0) return default_width;
+            return ws.col;
+        },
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
